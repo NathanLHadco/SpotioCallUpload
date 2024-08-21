@@ -11,11 +11,8 @@ AS
 DECLARE @command nvarchar(max), @cmdquery varchar(8000)
 DECLARE @filename varchar(100), @LotsOfText nvarchar(max), @xml xml
 
-/*
-DROP TABLE #TempFieldData
-DROP TABLE #TempFieldData2
-DROP TABLE #TempFieldData3
-*/
+BEGIN
+
 --Get a list of files in the app directory
 	DECLARE @filelist table
 	(
@@ -323,7 +320,7 @@ DROP TABLE #TempFieldData3
 					DECLARE @DocNo as nvarchar(20)
 
 					--increment by 1 and get the doc no 
-					UPDATE [GDB_01_001_test].[dbo].[COUNTERSTBL]
+					UPDATE [GDB_01_001].[dbo].[COUNTERSTBL]
 					SET  
 						[COUNTER] = [COUNTER]+1         
 					where DOC_CATEGORY='CT'
