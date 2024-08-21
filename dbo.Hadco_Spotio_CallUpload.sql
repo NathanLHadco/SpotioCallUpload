@@ -11,8 +11,11 @@ AS
 DECLARE @command nvarchar(max), @cmdquery varchar(8000)
 DECLARE @filename varchar(100), @LotsOfText nvarchar(max), @xml xml
 
-BEGIN
-	
+/*
+DROP TABLE #TempFieldData
+DROP TABLE #TempFieldData2
+DROP TABLE #TempFieldData3
+*/
 --Get a list of files in the app directory
 	DECLARE @filelist table
 	(
@@ -82,7 +85,6 @@ BEGIN
 					, @stageid = ISNULL(data.value('(stageId)[1]','VARCHAR(20)'),'')
 				FROM @xml.nodes('/ActivityOutput/ActivityItem/dataObject') AS TEMPTABLE(data)
 
-
 				-- Match salesperson based on user or name
 				SELECT @user = 
 				(
@@ -105,16 +107,11 @@ BEGIN
 						data.value('(value)[1]', 'VARCHAR(100)')
 				FROM @xml.nodes('/ActivityOutput/CustomerData/fields/Field') AS TEMPTABLE(data)
 
-				-- help us clean our old connections, necessary to update call history from old accts
-				If @acctno IN (SELECT ACCTNO FROM CUSTVEND) AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
-				BEGIN
-				INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
-				VALUES (@acctno, @spotio_id)
-				END
-				--since we linked acctno and spotio id above, we only need to search by hadco spotio id
-				If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
-				BEGIN
-					--Get details about the new customer
+				set @website = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 20)
+				set @OSFocus = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 14)
+				set @account_type = (SELECT TOP 1 CS.ACCOUNT_TYPE FROM CUSTVENDSETUP CS JOIN TBLCODE T ON CS.ACCOUNT_TYPE = T.TBLCODE AND TBLTYPE = '002' where name = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 10))
+
+				--Get details about the new customer
 					
 					SELECT @tel = data.value('(string)[1]', 'VARCHAR(100)')
 					FROM @xml.nodes('/ActivityOutput/CustomerData/phones') AS TEMPTABLE(data)
@@ -136,6 +133,17 @@ BEGIN
 					SELECT @city = LTRIM(LEFT(@substr2, @comma2 - 1))
 					SELECT @state = LEFT(LTRIM(LEFT(@substr3, @comma3 - 1)),2)
 					SELECT @zip = REPLACE(LTRIM(LEFT(@substr3, @comma3 - 1)), @state + ' ', '')
+
+				-- help us clean our old connections, necessary to update call history from old accts
+				If @acctno IN (SELECT ACCTNO FROM CUSTVEND) AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
+				BEGIN
+				INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
+				VALUES (@acctno, @spotio_id)
+				END
+				--since we linked acctno and spotio id above, we only need to search by hadco spotio id
+				If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
+				BEGIN
+					
 
 
 					--Much of this section borrowed from uspAddNewCustumer, from the old Call Report app
@@ -233,9 +241,74 @@ BEGIN
 
 				
 	--since we linked acctno and spotio id above, we only need to search by hadco spotio id
+				
 	
 				IF @name <> '' AND @spotio_id IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
 				BEGIN
+
+					----------------------------------------------------------
+					--Update customer details
+					----------------------------------------------------------
+
+					UPDATE "CUSTVEND"
+					set
+					"WEB_SITE" = @website
+					, "ALT3_CODE_C" = @OSFocus
+					where "ACCTNO" = @acctno
+
+					UPDATE "CUSTVENDSETUP"
+					set
+					"ACCOUNT_TYPE" = @account_type
+					where "acctno" = @acctno
+
+					print @website
+					print @OSFocus
+					print @account_type
+
+					set @approved = ''
+					set @approved = (select APPROVED from CUSTVENDSETUP where @acctno = ACCTNO)
+
+					If @acctno <> '' AND @approved = 'N'
+						begin
+				
+						UPDATE "CUSTVEND"
+						set
+							"ADR1" = RTRIM(@addr1)
+							,"CITY" = RTRIM(@city)
+							,"STATE" = RTRIM(@state)
+							,"ZIP" = RTRIM(@zip)
+							,"NAME" = @name
+						where "ACCTNO" = @acctno
+
+					print @addr1
+					print @city
+					print @state
+					print @zip
+					print @name
+					print @stageid
+						--Not a Good Fit
+						if @stageid = '5'
+						BEGIN
+							UPDATE CUSTVENDSETUP
+							SET PRIORITY = 'X'
+							WHERE ACCTNO = @acctno
+							AND CUST_VEND = 'C'
+						END
+					
+						--Business Closed
+						if @stageid = '6'
+						BEGIN
+							UPDATE CUSTVENDSETUP
+							SET PRIORITY = 'Z'
+							WHERE ACCTNO = @acctno
+							AND CUST_VEND = 'C'
+						END
+
+					--keep track if file was processed
+					set @processedFile = 'true'
+				
+					end
+
 					----------------------------------------------------------
 					--Update Priority
 					----------------------------------------------------------
@@ -243,19 +316,6 @@ BEGIN
 					FROM Hadco_SpotIO_ID
 					WHERE spotio_id = @spotio_id
 
-					--Not a Good Fit
-					UPDATE CUSTVENDSETUP
-					SET PRIORITY = 'X'
-					WHERE ACCTNO = @acctno
-					AND CUST_VEND = 'C'
-					AND @stageid = '5'
-					
-					--Business Closed
-					UPDATE CUSTVENDSETUP
-					SET PRIORITY = 'Z'
-					WHERE ACCTNO = @acctno
-					AND CUST_VEND = 'C'
-					AND @stageid = '6'
 
 					----------------------------------------------------------
 					--Update call tracking
@@ -263,7 +323,7 @@ BEGIN
 					DECLARE @DocNo as nvarchar(20)
 
 					--increment by 1 and get the doc no 
-					UPDATE [GDB_01_001].[dbo].[COUNTERSTBL]
+					UPDATE [GDB_01_001_test].[dbo].[COUNTERSTBL]
 					SET  
 						[COUNTER] = [COUNTER]+1         
 					where DOC_CATEGORY='CT'
