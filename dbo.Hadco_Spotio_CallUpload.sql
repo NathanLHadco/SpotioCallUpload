@@ -1,6 +1,6 @@
-USE [GDB_01_001_test]
+USE [GDB_01_001]
 GO
-/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 8/21/2024 10:14:53 AM ******/
+/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 8/21/2024 10:22:46 AM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -36,7 +36,6 @@ BEGIN
 			FROM @filelist 
 			WHERE id = @counter
 			AND isfile = 1
-			PRINT @filename
 			--Get file xml
 			SET @command =
 				'BEGIN TRY 
@@ -50,9 +49,9 @@ BEGIN
 			EXECUTE sp_ExecuteSQL @command, N'@LotsOfText nvarchar(max) output ', @LotsOfText output
 
 
-			DECLARE @spotio_id varchar(100), @account_type varchar(5), @name varchar(60), @user varchar(10), @date datetime, @address varchar(1000), @acctno varchar(20), @stageid varchar(20)
-			
+			DECLARE @spotio_id varchar(100), @account_type varchar(5), @name varchar(60), @user varchar(10), @date datetime, @address varchar(1000), @acctno varchar(20), @stageid varchar(20), @email varchar(100), @website varchar(100), @tel varchar(100), @approved varchar(8), @OSFocus varchar(100)
 			IF @LotsOfText <> 'Error'
+
 			BEGIN
 				SELECT @xml = CONVERT(xml, @LotsOfText)
 
@@ -64,18 +63,25 @@ BEGIN
 				SET @address = ''
 				SET @acctno = ''
 				SET @stageid = ''
+	--nate file variable
+				DECLARE @processedFile bit
+				set @processedFile = 'false'
 
 				--Get date
 				SELECT @date = data.value('(date)[1]','DATETIME')
 				FROM @xml.nodes('/ActivityOutput/ActivityItem') AS TEMPTABLE(data)
-
 				--Get Spotio ID and name
+				SELECT @acctno = ISNULL(data.value('(externalDataObjectId)[1]','VARCHAR(1000)'),'')
+				FROM @xml.nodes('/ActivityOutput/CustomerData') AS TEMPTABLE(data)
+
 				SELECT @spotio_id = ISNULL(data.value('(id)[1]','VARCHAR(100)'),'')
-				--acctno has no value
+	--acctno has no value here
+					
 					, @name = RTRIM(REPLACE(ISNULL(data.value('(name)[1]','VARCHAR(100)'),''), RTRIM(@acctno), ''))
 					, @address = ISNULL(data.value('(address)[1]','VARCHAR(1000)'),'')
 					, @stageid = ISNULL(data.value('(stageId)[1]','VARCHAR(20)'),'')
 				FROM @xml.nodes('/ActivityOutput/ActivityItem/dataObject') AS TEMPTABLE(data)
+
 
 				-- Match salesperson based on user or name
 				SELECT @user = 
@@ -99,15 +105,21 @@ BEGIN
 						data.value('(value)[1]', 'VARCHAR(100)')
 				FROM @xml.nodes('/ActivityOutput/CustomerData/fields/Field') AS TEMPTABLE(data)
 
-				--If new customer, insert into Pentagon
+				-- help us clean our old connections, necessary to update call history from old accts
+				If @acctno IN (SELECT ACCTNO FROM CUSTVEND) AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
+				BEGIN
+				INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
+				VALUES (@acctno, @spotio_id)
+				END
+				--since we linked acctno and spotio id above, we only need to search by hadco spotio id
 				If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
 				BEGIN
 					--Get details about the new customer
-					DECLARE @tel varchar(100)
+					
 					SELECT @tel = data.value('(string)[1]', 'VARCHAR(100)')
 					FROM @xml.nodes('/ActivityOutput/CustomerData/phones') AS TEMPTABLE(data)
 
-					DECLARE @email varchar(100)
+					
 					SELECT @email = data.value('(string)[1]', 'VARCHAR(100)')
 					FROM @xml.nodes('/ActivityOutput/CustomerData/emails') AS TEMPTABLE(data)
 
@@ -215,9 +227,13 @@ BEGIN
 					INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
 					VALUES (@acctno, @spotio_id)
 
+					--keep track if file was processed
+					set @processedFile = 'true'
 				END	
 
 				
+	--since we linked acctno and spotio id above, we only need to search by hadco spotio id
+	
 				IF @name <> '' AND @spotio_id IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
 				BEGIN
 					----------------------------------------------------------
@@ -247,7 +263,7 @@ BEGIN
 					DECLARE @DocNo as nvarchar(20)
 
 					--increment by 1 and get the doc no 
-					UPDATE [GDB_01_001_test].[dbo].[COUNTERSTBL]
+					UPDATE [GDB_01_001].[dbo].[COUNTERSTBL]
 					SET  
 						[COUNTER] = [COUNTER]+1         
 					where DOC_CATEGORY='CT'
@@ -454,6 +470,426 @@ BEGIN
 							, 'AUTO'
 					END
 
+
+				--keep track if file was processed 
+					set @processedFile = 'true'				
+			END
+
+
+			--remove clutter
+			if @LotsOfText = '<ArrayOfDataObjectFull xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/>'
+			BEGIN
+			--keep track if file was processed 
+					set @processedFile = 'true'
+			end
+
+
+			SET @date = GETDATE()
+			SET @spotio_id = '' 
+			SET @name = ''  
+			SET @user = '' --dont have example of. I dont think we need as we only care about added user in custvend
+			SET @address = '' 
+			SET @acctno = '' 
+			SET @email = '' -- have accts can have multiple, will pull from id "73" label "Contact #1 Email" check with Aaron if this will cause any issues on upload
+			SET @website = '' 
+			SET @tel = '' 
+
+
+			--create table with spotioid
+			CREATE TABLE #TempFieldData2 
+			(
+				spotioId  VARCHAR(100)
+			)
+			INSERT INTO #TempFieldData2 (spotioId)
+			SELECT data.value('(id)[1]', ' VARCHAR(100)')
+			FROM @xml.nodes('/ArrayOfDataObjectFull/DataObjectFull') AS TEMPTABLE(data)
+
+			--start loop here
+			--need loop statement if more than 1 account updated
+			DECLARE @updateLoopVar int, @numUpdates int
+			set @updateLoopVar = 0
+			set @numUpdates = (SELECT count(spotioId) FROM #TempFieldData2)
+
+
+			while @updateLoopVar < @numUpdates
+			BEGIN
+			
+
+			--for use in linking data in table3
+			set @spotio_id = (SELECT TOP 1 spotioId FROM #TempFieldData2)
+			
+			--website spotio fieldId
+			declare @spotioWebVar int, @spotioTelVar int, @spotioEmailVar int, @spotioAcctType int, @contact1Title int, @contact1Email int, @contact1Phone int, @contact1fname int, @contact1lname int, @contact2Title int, @contact2Email int, @contact2Phone int, @contact2fname int, @contact2lname int, @contact3Title int, @contact3Email int, @contact3Phone int, @contact3fname int, @contact3lname int, @OSFocusVar int
+			set @spotioWebVar = 20
+			set @spotioTelVar = 74
+			set @spotioEmailVar = 73
+			set @spotioAcctType = 10
+			set @OSFocusVar = 14
+
+			set @contact1Title = 72
+			set @contact1Email = 73
+			set @contact1Phone = 74
+			set @contact1fname = 70
+			set @contact1lname = 71
+
+			set @contact2Title = 59
+			set @contact2Email = 60
+			set @contact2Phone = 61
+			set @contact2fname = 63
+			set @contact2lname = 62
+
+			set @contact3Title = 55
+			set @contact3Email = 53
+			set @contact3Phone = 54
+			set @contact3fname = 57
+			set @contact3lname = 56
+
+			--spotiocontact123 variables
+			declare @spotiocontact1Title varchar(100), @spotiocontact1Email varchar(100), @spotiocontact1Phone varchar(100), @spotiocontact1fname varchar(100), @spotiocontact1lname varchar(100), @spotiocontact2Title varchar(100), @spotiocontact2Email varchar(100), @spotiocontact2Phone varchar(100), @spotiocontact2fname varchar(100), @spotiocontact2lname varchar(100), @spotiocontact3Title varchar(100), @spotiocontact3Email varchar(100), @spotiocontact3Phone varchar(100), @spotiocontact3fname varchar(100), @spotiocontact3lname varchar(100)
+
+			--find values associated with spotioId or return null
+			CREATE TABLE #TempFieldData3
+			(
+				spotioId  VARCHAR(100),
+				acctno VARCHAR(20),
+				acctname VARCHAR(60),
+				addressValue VARCHAR(1000),
+				email VARCHAR(100),
+				website VARCHAR(100),
+				tel VARCHAR(100),
+				accttype VARCHAR(100),
+				stageid VARCHAR(20),
+				osfocus VARCHAR(100),
+				contact1Title varchar(100),
+				contact1Email varchar(100),
+				contact1Phone varchar(100),
+				contact1fname varchar(100),
+				contact1lname varchar(100),
+				contact2Title varchar(100),
+				contact2Email varchar(100),
+				contact2Phone varchar(100),
+				contact2fname varchar(100),
+				contact2lname varchar(100),
+				contact3Title varchar(100),
+				contact3Email varchar(100),
+				contact3Phone varchar(100),
+				contact3fname varchar(100),
+				contact3lname varchar(100),
+
+			)
+			INSERT INTO #TempFieldData3 (spotioId, acctno, acctname, addressValue, email, website, tel, accttype, stageid, osfocus, contact1Title, contact1Email, contact1Phone, contact1fname, contact1lname, contact2Title, contact2Email, contact2Phone, contact2fname, contact2lname, contact3Title, contact3Email, contact3Phone, contact3fname, contact3lname)
+			select data.value(N'(DataObjectFull/id)[1]', ' VARCHAR(100)')
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/externalDataObjectId)[1]', N'varchar(20)') AS acctno
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/name)[1]', N'varchar(60)') AS acctname
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/pin/address)[1]', N'varchar(1000)') AS addressValue
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioEmailVar")]/value)[1]', N'varchar(100)') AS email
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioWebVar")]/value)[1]', N'varchar(100)') AS website
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioTelVar")]/value)[1]', N'varchar(100)') AS tel
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioAcctType")]/value)[1]', N'varchar(100)') AS accttype
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/stageId)[1]', N'varchar(100)') AS stageid
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@OSFocusVar")]/value)[1]', N'varchar(100)') AS osfocus
+
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1Title")]/value)[1]', N'varchar(100)') AS contact1Title
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1Email")]/value)[1]', N'varchar(100)') AS contact1Email
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1Phone")]/value)[1]', N'varchar(100)') AS contact1Phone
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1fname")]/value)[1]', N'varchar(100)') AS contact1fname
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1lname")]/value)[1]', N'varchar(100)') AS contact1lname
+			
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact2Title")]/value)[1]', N'varchar(100)') AS contact2Title
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact2Email")]/value)[1]', N'varchar(100)') AS contact2Email
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact2Phone")]/value)[1]', N'varchar(100)') AS contact2Phone
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact2fname")]/value)[1]', N'varchar(100)') AS contact2fname
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact2lname")]/value)[1]', N'varchar(100)') AS contact2lname
+			
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact3Title")]/value)[1]', N'varchar(100)') AS contact3Title
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact3Email")]/value)[1]', N'varchar(100)') AS contact3Email
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact3Phone")]/value)[1]', N'varchar(100)') AS contact3Phone
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact3fname")]/value)[1]', N'varchar(100)') AS contact3fname
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact3lname")]/value)[1]', N'varchar(100)') AS contact3lname
+			FROM @xml.nodes('/ArrayOfDataObjectFull') AS TEMPTABLE(data)
+
+			
+			
+			set @acctno = (SELECT TOP 1 acctno FROM #TempFieldData3)
+			SET @name = RTRIM(REPLACE(ISNULL((SELECT TOP 1 acctname FROM #TempFieldData3),''), RTRIM(@acctno), ''))
+			set @address = (SELECT TOP 1 addressValue FROM #TempFieldData3)
+			set @email = (SELECT TOP 1 email FROM #TempFieldData3)
+			set @website = (SELECT TOP 1 website FROM #TempFieldData3)
+			set @tel = (SELECT TOP 1 tel FROM #TempFieldData3)
+			set @account_type = (SELECT TOP 1 CS.ACCOUNT_TYPE FROM CUSTVENDSETUP CS JOIN TBLCODE T ON CS.ACCOUNT_TYPE = T.TBLCODE AND TBLTYPE = '002' where name = (SELECT TOP 1 accttype FROM #TempFieldData3))
+			set @stageid = (SELECT TOP 1 stageid FROM #TempFieldData3)
+			set @OSFocus = (SELECT TOP 1 osfocus FROM #TempFieldData3)
+
+			set @spotiocontact1Title = (SELECT TOP 1 contact1Title FROM #TempFieldData3)
+			set @spotiocontact1Email = (SELECT TOP 1 contact1Email FROM #TempFieldData3)
+			set @spotiocontact1Phone = (SELECT TOP 1 contact1Phone FROM #TempFieldData3)
+			set @spotiocontact1fname = (SELECT TOP 1 contact1fname FROM #TempFieldData3)
+			set @spotiocontact1lname = (SELECT TOP 1 contact1lname FROM #TempFieldData3)
+			
+			set @spotiocontact2Title = (SELECT TOP 1 contact2Title FROM #TempFieldData3)
+			set @spotiocontact2Email = (SELECT TOP 1 contact2Email FROM #TempFieldData3)
+			set @spotiocontact2Phone = (SELECT TOP 1 contact2Phone FROM #TempFieldData3)
+			set @spotiocontact2fname = (SELECT TOP 1 contact2fname FROM #TempFieldData3)
+			set @spotiocontact2lname = (SELECT TOP 1 contact2lname FROM #TempFieldData3)
+			
+			set @spotiocontact3Title = (SELECT TOP 1 contact3Title FROM #TempFieldData3)
+			set @spotiocontact3Email = (SELECT TOP 1 contact3Email FROM #TempFieldData3)
+			set @spotiocontact3Phone = (SELECT TOP 1 contact3Phone FROM #TempFieldData3)
+			set @spotiocontact3fname = (SELECT TOP 1 contact3fname FROM #TempFieldData3)
+			set @spotiocontact3lname = (SELECT TOP 1 contact3lname FROM #TempFieldData3)
+			
+
+			--if no assigned value, look up in spotio to hadco uid linking table
+			if (@acctno = '')
+			BEGIN
+				SELECT @acctno = acctno
+				FROM Hadco_SpotIO_ID
+				WHERE spotio_id = @spotio_id
+			End
+			
+			--Parse address
+			DECLARE @addr1_2 varchar(50), @city_2 varchar(30), @state_2 varchar(4), @zip_2 varchar(12)
+			DECLARE @comma1_2 int, @comma2_2 int, @comma3_2 int, @substr2_2 varchar(1000), @substr3_2 varchar(1000)
+			SELECT @comma1_2 = CHARINDEX(',', @address)
+			SELECT @substr2_2 = RIGHT(@address, LEN(@address) - @comma1_2)
+			SELECT @comma2_2 = CHARINDEX(',', @substr2_2)
+			SELECT @substr3_2 = RIGHT(@substr2_2, LEN(@substr2_2) - @comma2_2)
+			SELECT @comma3_2 = CHARINDEX(',', @substr3_2)
+
+			SELECT @addr1_2 = LEFT(@address, @comma1_2 - 1)
+			SELECT @city_2 = LTRIM(LEFT(@substr2_2, @comma2_2 - 1))
+			SELECT @state_2 = LEFT(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)),2)
+			SELECT @zip_2 = REPLACE(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)), @state_2 + ' ', '')
+
+
+			
+			-- check if acct is approved customer
+			set @approved = ''
+			set @approved = (select APPROVED from CUSTVENDSETUP where @acctno = ACCTNO)
+
+			
+			--if we are able to pull an acctno to run off, we should be able to pull the info and modify not approved customer
+			If @acctno <> ''
+			begin
+				--not changing atm "REGION" (not available), "ADDED_USR" (not available), "ADDED_DTE" (we should never have to change)
+				UPDATE "CUSTVEND"
+					set
+					"WEB_SITE" = @website
+					, "ALT3_CODE_C" = @OSFocus
+					where "ACCTNO" = @acctno
+
+					UPDATE "CUSTVENDSETUP"
+					set
+					"ACCOUNT_TYPE" = @account_type
+					where "acctno" = @acctno
+
+
+					
+					--Contact 1
+					--Update
+					IF (@spotiocontact1fname <> '' and @spotiocontact1lname <> ''
+						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01'))
+					BEGIN
+						UPDATE CONTACTS
+						SET F_NAME = (@spotiocontact1fname) --first name
+							, L_NAME = (@spotiocontact1lname) --last name
+							, TITLE = (@spotiocontact1Title) --title
+							, TEL1 = (@spotiocontact1Phone) --tel
+							, EMAIL = (@spotiocontact1Email) --email
+							, UPDATED_USR = 'AUTO'
+							, UPDATED_DTE = GETDATE()
+						WHERE ACCTNO = @acctno
+						AND CCODE = 'S01'
+					END
+					--Insert
+					IF (@spotiocontact1fname <> '' and @spotiocontact1lname <> ''
+						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01'))
+					BEGIN
+						--Get and increment counter	
+						SELECT @doc_no = COUNTER FROM COUNTERSTBL WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+						UPDATE COUNTERSTBL SET COUNTER = COUNTER + 1 WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+
+						--Insert contact records
+						INSERT INTO CONTACTS (DOC_NO, ACCTNO, SUBC, CCODE, F_NAME, L_NAME, TITLE, TEL1, EMAIL, HOLD, COMPANYNO, ADDED_DTE, ADDED_USR)
+						SELECT
+							@doc_no + 1
+							, @acctno
+							, '1'
+							, 'S01'
+							, (@spotiocontact1fname) --first name
+							, (@spotiocontact1lname) --last name
+							, (@spotiocontact1Title) --title
+							, (@spotiocontact1Phone) --tel
+							, (@spotiocontact1Email) --email
+							, 'N'
+							, 1
+							, GETDATE()
+							, 'AUTO'
+
+						--Update default contact, if none exists
+						UPDATE CUSTVENDSETUP
+						SET CCODE = 'S01'
+						WHERE ACCTNO = @acctno
+						AND CUST_VEND = 'C'
+						AND ISNULL(CCODE,'') = ''
+					END
+
+					--Contact 2
+					--Update
+					IF (@spotiocontact2fname <> '' and @spotiocontact2lname <> ''
+						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02'))
+					BEGIN
+						UPDATE CONTACTS
+						SET F_NAME = (@spotiocontact2fname) --first name
+							, L_NAME = (@spotiocontact2lname) --last name
+							, TITLE = (@spotiocontact2Title) --title
+							, TEL1 = (@spotiocontact2Phone) --tel
+							, EMAIL = (@spotiocontact2Email) --email
+							, UPDATED_USR = 'AUTO'
+							, UPDATED_DTE = GETDATE()
+						WHERE ACCTNO = @acctno
+						AND CCODE = 'S02'
+					END
+					--Insert
+					IF (@spotiocontact2fname <> '' and @spotiocontact2lname <> ''
+						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02'))
+					BEGIN
+						--Get and increment counter	
+						SELECT @doc_no = COUNTER FROM COUNTERSTBL WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+						UPDATE COUNTERSTBL SET COUNTER = COUNTER + 1 WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+
+						--Insert contact records
+						INSERT INTO CONTACTS (DOC_NO, ACCTNO, SUBC, CCODE, F_NAME, L_NAME, TITLE, TEL1, EMAIL, HOLD, COMPANYNO, ADDED_DTE, ADDED_USR)
+						SELECT
+							@doc_no + 1
+							, @acctno
+							, '1'
+							, 'S02'
+							, (@spotiocontact2fname) --first name
+							, (@spotiocontact2lname) --last name
+							, (@spotiocontact2Title) --title
+							, (@spotiocontact2Phone) --tel
+							, (@spotiocontact2Email) --email
+							, 'N'
+							, 1
+							, GETDATE()
+							, 'AUTO'
+
+						--Update default contact, if none exists
+						UPDATE CUSTVENDSETUP
+						SET CCODE = 'S02'
+						WHERE ACCTNO = @acctno
+						AND CUST_VEND = 'C'
+						AND ISNULL(CCODE,'') = ''
+					END
+
+					--Contact 3
+					--Update
+					IF (@spotiocontact3fname <> '' and @spotiocontact3lname <> ''
+						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03'))
+					BEGIN
+						UPDATE CONTACTS
+						SET F_NAME = (@spotiocontact3fname) --first name
+							, L_NAME = (@spotiocontact3lname) --last name
+							, TITLE = (@spotiocontact3Title) --title
+							, TEL1 = (@spotiocontact3Phone) --tel
+							, EMAIL = (@spotiocontact3Email) --email
+							, UPDATED_USR = 'AUTO'
+							, UPDATED_DTE = GETDATE()
+						WHERE ACCTNO = @acctno
+						AND CCODE = 'S03'
+					END
+					--Insert
+					IF (@spotiocontact3fname <> '' and @spotiocontact3lname <> ''
+						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03'))
+					BEGIN
+						--Get and increment counter	
+						SELECT @doc_no = COUNTER FROM COUNTERSTBL WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+						UPDATE COUNTERSTBL SET COUNTER = COUNTER + 1 WHERE DOC_CATEGORY = 'CDN' AND DOC_TYPE = 'D'
+
+						--Insert contact records
+						INSERT INTO CONTACTS (DOC_NO, ACCTNO, SUBC, CCODE, F_NAME, L_NAME, TITLE, TEL1, EMAIL, HOLD, COMPANYNO, ADDED_DTE, ADDED_USR)
+						SELECT
+							@doc_no + 1
+							, @acctno
+							, '1'
+							, 'S03'
+							, (@spotiocontact3fname) --first name
+							, (@spotiocontact3lname) --last name
+							, (@spotiocontact3Title) --title
+							, (@spotiocontact3Phone) --tel
+							, (@spotiocontact3Email) --email
+							, 'N'
+							, 1
+							, GETDATE()
+							, 'AUTO'
+
+						--Update default contact, if none exists
+						UPDATE CUSTVENDSETUP
+						SET CCODE = 'S03'
+						WHERE ACCTNO = @acctno
+						AND CUST_VEND = 'C'
+						AND ISNULL(CCODE,'') = ''
+					END
+
+					--keep track if file was processed
+					set @processedFile = 'true'
+				
+			end
+
+			--if acctno has value and not an approved cust
+			print @acctno
+			print @approved
+			print @stageid
+
+			If @acctno <> '' AND @approved = 'N'
+			begin
+				
+				
+				UPDATE "CUSTVEND"
+					set
+					"ADR1" = RTRIM(@addr1_2)
+					,"CITY" = RTRIM(@city_2)
+					,"STATE" = RTRIM(@state_2)
+					,"ZIP" = RTRIM(@zip_2)
+					,"NAME" = @name
+					where "ACCTNO" = @acctno
+
+					
+					--Not a Good Fit
+					if @stageid = '5'
+					BEGIN
+						UPDATE CUSTVENDSETUP
+						SET PRIORITY = 'X'
+						WHERE ACCTNO = @acctno
+						AND CUST_VEND = 'C'
+					END
+					
+					--Business Closed
+					if @stageid = '6'
+					BEGIN
+						UPDATE CUSTVENDSETUP
+						SET PRIORITY = 'Z'
+						WHERE ACCTNO = @acctno
+						AND CUST_VEND = 'C'
+						print 'success'
+					END
+
+					--keep track if file was processed
+					set @processedFile = 'true'
+				
+			end
+			--end loop here
+			DELETE FROM #TempFieldData2 WHERE spotioId = @spotio_id
+			set @updateLoopVar = @updateLoopVar + 1
+			DROP TABLE #TempFieldData3
+			END
+			--if we have set the conditions for one of the previous steps we move the file to archive (create account, new call log data, or modify the account details)
+
+
+			
+			if @processedFile = 'true'
+			BEGIN
 				--Copy file to Archive
 				SET @cmdquery = 'copy "D:\CallReportFiles\spotio\' + @filename + '"'
 					+ ' "\\hpa-nas01\archive\CallReportApp_Files\"'
@@ -462,14 +898,21 @@ BEGIN
 				--Delete file
 				SET @cmdquery = 'del "D:\CallReportFiles\spotio\' + @filename +'"'
 				EXEC master..xp_cmdshell @cmdquery
-
 			END
+			
 
+			
+			
+			
+			--nate stop messing
+			
 			SET @counter = @counter + 1
+			
 			
 		END
 
 		DROP TABLE #TempFieldData
+		DROP TABLE #TempFieldData2
 	END
 
 END
