@@ -731,7 +731,116 @@ BEGIN
 			set @approved = ''
 			set @approved = (select APPROVED from CUSTVENDSETUP where @acctno = ACCTNO)
 
-			
+			/*
+			print @acctno
+			print @spotio_id
+			print @name
+			print @user
+			print @addr1_2
+			print @city_2
+			print @state_2
+			print @zip_2
+			print @tel
+			print @email
+			print @stageid
+			print @osfocus
+			print @website
+			print @account_type
+			print @insideuser
+			*/
+
+			--create new customer if necessary
+			if @acctno is null
+			begin
+			--add acct
+			If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
+				BEGIN
+					--for these files, there is no outside sales person, so we assign AUTO
+					SET @user = 'AUTO'
+					--Much of this section borrowed from uspAddNewCustumer, from the old Call Report app
+					select @next=cust_count from compsetup1
+					set @next=@next+1
+					update compsetup1 set cust_count=cust_count+1
+					SET @acctno = CAST(@next AS varchar(12))
+
+					--Insert customer
+					insert into "CUSTVEND"
+						("ACCTNO", "SUBC", "CUST_VEND","REGION","NAME","ADR1","ADR2","CITY","STATE","ZIP","COUNTRY","WEB_SITE","TEL1","EMAIL","FAX_TIME", "ALT1_CODE_C", "ALT2_CODE_C", "ALT3_CODE_C", "ALT4_CODE_C", "PRINT_TARGET", "PRINT_EMAIL_FORMAT", "INTERCOMPANY_ACCOUNT", "ADDED_USR", "ADDED_DTE")
+					VALUES
+					(                             
+						@acctno
+						, '1'
+						, 'C'
+						, @user
+						, @name
+						, @addr1_2                                                                                                                                             --addr1 = everything before the first comma
+						, ''
+						, @city_2
+						, @state_2
+						, @zip_2
+						, 'US'
+						, @website
+						, @tel
+						, @email
+						,'00:00'
+						, NULL
+						, NULL
+						, NULL
+						, ''
+						, '2'
+						, '1'
+						, 'N'
+						, @user
+						, getdate()
+					)
+
+					insert into "CUSTVENDSETUP"
+						("ACCTNO", "SUBC", "CUST_VEND", "PRIORITY", "ACCOUNT_TYPE", "RCV_OVER_SHIP", "SHIP_DEF_NO", "BILL_DEF_NO", "PAY_DEF_NO", "PAY_US", "COMPANYNO", "DIVISION", "DEPART", "FORM_1099", "HOLD", "HOLD_DATE", "HOLD_BY", "APPROVED", "APPROVED_DATE", "APPROVED_BY", "ULINES","TERM_CODE" ,"SHIP_COMPLETE", "POST_SHIP_DOC", "INV_TYPE", "ACCOUNT_RATE", "EARLY_SHIPMENT", "DAYS_BEFORE_SHIPPING", "FOB", "FOB_LBL", "GL_ACCOUNT", "CURENCY_CONV", "MIN_ORDER_LINE", "MIN_ORDER", "QT_TYPE_DEF", "SO_TYPE_DEF", "RF_TYPE_DEF", "PO_TYPE_DEF", "SMAN1_NG", "SMAN2_NG", "SMAN3_NG", "SMAN4_NG", "SMAN5_NG", "SMAN1_DOCLN", "SMAN2_DOCLN", "SMAN3_DOCLN", "SMAN4_DOCLN", "SMAN5_DOCLN", "DISC_TYPE", "DISC_DOCLN", "MISC1_DOCLN", "MISC2_DOCLN", "MISC3_DOCLN", "MISC4_DOCLN", "MISC5_DOCLN", "MISC6_DOCLN", "MISC1_TYPE", "MISC2_TYPE", "MISC3_TYPE", "MISC4_TYPE", "MISC5_TYPE", "MISC6_TYPE", "MISC1_PRN", "MISC2_PRN", "MISC3_PRN", "MISC4_PRN", "MISC5_PRN", "MISC6_PRN", "MISC1_TTL", "MISC2_TTL", "MISC3_TTL", "MISC4_TTL", "MISC5_TTL", "MISC6_TTL", "SUBT_TAX_A", "SUBT_TAX_B", "SUBT_TAX_C", "M1_TAX_A", "M1_TAX_B", "M1_TAX_C", "M2_TAX_A", "M2_TAX_B", "M2_TAX_C", "M3_TAX_A", "M3_TAX_B", "M3_TAX_C", "M4_TAX_A", "M4_TAX_B", "M4_TAX_C", "M5_TAX_A", "M5_TAX_B", "M5_TAX_C", "M6_TAX_A", "M6_TAX_B", "M6_TAX_C", "TAX_A_CODE", "TAX_B_CODE", "TAX_C_CODE", "TAX_A_TTL", "TAX_B_TTL", "TAX_C_TTL", "EXCH_CORE_CHRG", "EXCH_CORE_RETURN", "EXCH_CORE_NOTE", "EXCH_CHARGE_FROM", "EXCH_CHARGE_COST", "EXCH_CORE_COST", "EXCH_CORE_PERC", "SMAN1_CODE", "ADDED_USR", "ADDED_DTE")
+					VALUES
+					(
+						@acctno
+						, '1'
+						, 'C'
+						, (CASE WHEN @osfocus = 'Y' THEN 'P' --High Priority Customer
+								WHEN @stageid = '5' THEN 'X' --Not a Good Fit
+								WHEN @stageid = '6' THEN 'Z' --Business Closed
+								ELSE NULL
+							END) 
+						, @account_type --Account Type
+						, 1.500000000000000e+001
+						, 0
+						, 0
+						, 0
+						, '02L'
+						, 1
+						, NULL
+						, NULL
+						, 'N'
+						, 'Y'
+						, getdate()
+						, @user
+						, 'N'
+						, getdate()
+						, @user
+						, 'N','RTBD', 'N', 'Y', 'D', NULL, 'N', 0, 'DST', 'FOB', '40000', 'USD', 0.000000000000000e+000, 4.000000000000000e+001, 'Q', 'S', 'R', 'P', 'N', 'N', 'N', 'N', 'N', 'D', 'D', 'D', 'D', 'D'
+						, '0', 'D', 'D', 'D', 'D', 'D', 'D', 'D', '1', '1', '1', '1', '1', '1', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N'
+						, 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', NULL, NULL, NULL, 'N', 'N', 'N', 'N', 30, 'Y', '2', '1', '5', 10
+						, @insideUser
+						, @user
+						, getdate()
+					)
+
+					--Record Pentagon acctno / SpotIO ID relationship
+					INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
+					VALUES (@acctno, @spotio_id)
+
+					--keep track if file was processed
+					set @processedFile = 'true'
+				END	
+
+			--end adding account
+			END
+
 			--if we are able to pull an acctno to run off, we should be able to pull the info and modify not approved customer
 			If @acctno <> ''
 			begin
@@ -905,6 +1014,8 @@ BEGIN
 
 			If @acctno <> '' AND @approved = 'N'
 			begin
+				
+				
 				UPDATE "CUSTVEND"
 					set
 					"ADR1" = RTRIM(@addr1_2)
@@ -914,6 +1025,7 @@ BEGIN
 					,"NAME" = @name
 					where "ACCTNO" = @acctno
 
+					
 					--Not a Good Fit
 					if @stageid = '5'
 					BEGIN
@@ -935,96 +1047,7 @@ BEGIN
 					--keep track if file was processed
 					set @processedFile = 'true'
 				
-			end
-
-			--start spotio modification if acctno is ''
-			if @acctno is null
-			begin
-			--add acct
-			If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
-				BEGIN
-					--for these files, there is no outside sales person, so we assign AUTO
-					SET @user = 'AUTO'
-					--Much of this section borrowed from uspAddNewCustumer, from the old Call Report app
-					select @next=cust_count from compsetup1
-					set @next=@next+1
-					update compsetup1 set cust_count=cust_count+1
-					SET @acctno = CAST(@next AS varchar(12))
-
-					--Insert customer
-					insert into "CUSTVEND"
-						("ACCTNO", "SUBC", "CUST_VEND","REGION","NAME","ADR1","ADR2","CITY","STATE","ZIP","COUNTRY","WEB_SITE","TEL1","EMAIL","FAX_TIME", "ALT1_CODE_C", "ALT2_CODE_C", "ALT3_CODE_C", "ALT4_CODE_C", "PRINT_TARGET", "PRINT_EMAIL_FORMAT", "INTERCOMPANY_ACCOUNT", "ADDED_USR", "ADDED_DTE")
-					VALUES
-					(                             
-						@acctno
-						, '1'
-						, 'C'
-						, @user
-						, @name
-						, @addr1_2                                                                                                                                             --addr1 = everything before the first comma
-						, ''
-						, @city_2
-						, @state_2
-						, @zip_2
-						, 'US'
-						, @website
-						, @tel
-						, @email
-						,'00:00'
-						, NULL
-						, NULL
-						, NULL
-						, ''
-						, '2'
-						, '1'
-						, 'N'
-						, @user
-						, getdate()
-					)
-
-					insert into "CUSTVENDSETUP"
-						("ACCTNO", "SUBC", "CUST_VEND", "PRIORITY", "ACCOUNT_TYPE", "RCV_OVER_SHIP", "SHIP_DEF_NO", "BILL_DEF_NO", "PAY_DEF_NO", "PAY_US", "COMPANYNO", "DIVISION", "DEPART", "FORM_1099", "HOLD", "HOLD_DATE", "HOLD_BY", "APPROVED", "APPROVED_DATE", "APPROVED_BY", "ULINES","TERM_CODE" ,"SHIP_COMPLETE", "POST_SHIP_DOC", "INV_TYPE", "ACCOUNT_RATE", "EARLY_SHIPMENT", "DAYS_BEFORE_SHIPPING", "FOB", "FOB_LBL", "GL_ACCOUNT", "CURENCY_CONV", "MIN_ORDER_LINE", "MIN_ORDER", "QT_TYPE_DEF", "SO_TYPE_DEF", "RF_TYPE_DEF", "PO_TYPE_DEF", "SMAN1_NG", "SMAN2_NG", "SMAN3_NG", "SMAN4_NG", "SMAN5_NG", "SMAN1_DOCLN", "SMAN2_DOCLN", "SMAN3_DOCLN", "SMAN4_DOCLN", "SMAN5_DOCLN", "DISC_TYPE", "DISC_DOCLN", "MISC1_DOCLN", "MISC2_DOCLN", "MISC3_DOCLN", "MISC4_DOCLN", "MISC5_DOCLN", "MISC6_DOCLN", "MISC1_TYPE", "MISC2_TYPE", "MISC3_TYPE", "MISC4_TYPE", "MISC5_TYPE", "MISC6_TYPE", "MISC1_PRN", "MISC2_PRN", "MISC3_PRN", "MISC4_PRN", "MISC5_PRN", "MISC6_PRN", "MISC1_TTL", "MISC2_TTL", "MISC3_TTL", "MISC4_TTL", "MISC5_TTL", "MISC6_TTL", "SUBT_TAX_A", "SUBT_TAX_B", "SUBT_TAX_C", "M1_TAX_A", "M1_TAX_B", "M1_TAX_C", "M2_TAX_A", "M2_TAX_B", "M2_TAX_C", "M3_TAX_A", "M3_TAX_B", "M3_TAX_C", "M4_TAX_A", "M4_TAX_B", "M4_TAX_C", "M5_TAX_A", "M5_TAX_B", "M5_TAX_C", "M6_TAX_A", "M6_TAX_B", "M6_TAX_C", "TAX_A_CODE", "TAX_B_CODE", "TAX_C_CODE", "TAX_A_TTL", "TAX_B_TTL", "TAX_C_TTL", "EXCH_CORE_CHRG", "EXCH_CORE_RETURN", "EXCH_CORE_NOTE", "EXCH_CHARGE_FROM", "EXCH_CHARGE_COST", "EXCH_CORE_COST", "EXCH_CORE_PERC", "SMAN1_CODE", "ADDED_USR", "ADDED_DTE")
-					VALUES
-					(
-						@acctno
-						, '1'
-						, 'C'
-						, (CASE WHEN @osfocus = 'Y' THEN 'P' --High Priority Customer
-								WHEN @stageid = '5' THEN 'X' --Not a Good Fit
-								WHEN @stageid = '6' THEN 'Z' --Business Closed
-								ELSE NULL
-							END) 
-						, @account_type --Account Type
-						, 1.500000000000000e+001
-						, 0
-						, 0
-						, 0
-						, '02L'
-						, 1
-						, NULL
-						, NULL
-						, 'N'
-						, 'Y'
-						, getdate()
-						, @user
-						, 'N'
-						, getdate()
-						, @user
-						, 'N','RTBD', 'N', 'Y', 'D', NULL, 'N', 0, 'DST', 'FOB', '40000', 'USD', 0.000000000000000e+000, 4.000000000000000e+001, 'Q', 'S', 'R', 'P', 'N', 'N', 'N', 'N', 'N', 'D', 'D', 'D', 'D', 'D'
-						, '0', 'D', 'D', 'D', 'D', 'D', 'D', 'D', '1', '1', '1', '1', '1', '1', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N'
-						, 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', NULL, NULL, NULL, 'N', 'N', 'N', 'N', 30, 'Y', '2', '1', '5', 10
-						, @insideUser
-						, @user
-						, getdate()
-					)
-
-					--Record Pentagon acctno / SpotIO ID relationship
-					INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
-					VALUES (@acctno, @spotio_id)
-
-					--keep track if file was processed
-					set @processedFile = 'true'
-				END	
+			end	
 
 			--end adding account
 			
