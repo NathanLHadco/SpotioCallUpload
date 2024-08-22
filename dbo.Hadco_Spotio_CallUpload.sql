@@ -905,8 +905,6 @@ BEGIN
 
 			If @acctno <> '' AND @approved = 'N'
 			begin
-				
-				
 				UPDATE "CUSTVEND"
 					set
 					"ADR1" = RTRIM(@addr1_2)
@@ -916,7 +914,6 @@ BEGIN
 					,"NAME" = @name
 					where "ACCTNO" = @acctno
 
-					
 					--Not a Good Fit
 					if @stageid = '5'
 					BEGIN
@@ -940,36 +937,6 @@ BEGIN
 				
 			end
 
-			
-			
-			
-			
-			
-			
-			
-			
-			
-			
-			
-			print @acctno
-			print @spotio_id
-			print @name
-			print @user
-			print @addr1_2
-			print @city_2
-			print @state_2
-			print @zip_2
-			print @tel
-			print @email
-			print @stageid
-			print @osfocus
-			print @website
-			print @account_type
-			print @insideuser
-			
-			
-			
-			
 			--start spotio modification if acctno is ''
 			if @acctno is null
 			begin
@@ -1069,8 +1036,6 @@ BEGIN
 			END
 			--if we have set the conditions for one of the previous steps we move the file to archive (create account, new call log data, or modify the account details)
 
-
-			
 			if @processedFile = 'true'
 			BEGIN
 				--Copy file to Archive
@@ -1083,14 +1048,9 @@ BEGIN
 				EXEC master..xp_cmdshell @cmdquery
 			END
 			
-
-			
-			
-			
 			--nate stop messing
 			
 			SET @counter = @counter + 1
-			
 			
 		END
 
