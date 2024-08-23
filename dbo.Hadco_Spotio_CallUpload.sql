@@ -704,7 +704,7 @@ BEGIN
 			
 
 			--if no assigned value, look up in spotio to hadco uid linking table
-			if (@acctno = '')
+			if (@acctno = '') or (@acctno is null)
 			BEGIN
 				SELECT @acctno = acctno
 				FROM Hadco_SpotIO_ID
