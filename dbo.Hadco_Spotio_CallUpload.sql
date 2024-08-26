@@ -49,7 +49,7 @@ BEGIN
 			EXECUTE sp_ExecuteSQL @command, N'@LotsOfText nvarchar(max) output ', @LotsOfText output
 
 
-			DECLARE @spotio_id varchar(100), @account_type varchar(5), @name varchar(60), @user varchar(10), @date datetime, @address varchar(1000), @acctno varchar(20), @stageid varchar(20), @email varchar(100), @website varchar(100), @tel varchar(100), @approved varchar(8), @OSFocus varchar(100)
+			DECLARE @spotio_id varchar(100), @account_type varchar(5), @name varchar(60), @user varchar(10), @insideUser varchar(10), @date datetime, @address varchar(1000), @acctno varchar(20), @stageid varchar(20), @email varchar(100), @website varchar(100), @tel varchar(100), @approved varchar(8), @OSFocus varchar(100), @username varchar(100), @changeFailueReason varchar(100), @BlankValue varchar(1)
 			IF @LotsOfText <> 'Error'
 
 			BEGIN
@@ -63,6 +63,7 @@ BEGIN
 				SET @address = ''
 				SET @acctno = ''
 				SET @stageid = ''
+				SET @BlankValue = ''
 	--nate file variable
 				DECLARE @processedFile bit
 				set @processedFile = 'false'
@@ -92,7 +93,8 @@ BEGIN
 							AND RTRIM(L_NAME) = data.value('(lastName)[1]','VARCHAR(100)')))
 				)
 				FROM @xml.nodes('/ActivityOutput/ReportingUser') AS TEMPTABLE(data)		 
-
+				
+					
 				--Get customer field data (contacts, etc.)
 				CREATE TABLE #TempFieldData 
 				(
@@ -118,18 +120,31 @@ BEGIN
 					FROM @xml.nodes('/ActivityOutput/CustomerData/emails') AS TEMPTABLE(data)
 
 					--Parse address
-					DECLARE @addr1 varchar(50), @city varchar(30), @state varchar(4), @zip varchar(12)
-					DECLARE @comma1 int, @comma2 int, @comma3 int, @substr2 varchar(1000), @substr3 varchar(1000)
-					SELECT @comma1 = CHARINDEX(',', @address)
-					SELECT @substr2 = RIGHT(@address, LEN(@address) - @comma1)
-					SELECT @comma2 = CHARINDEX(',', @substr2)
-					SELECT @substr3 = RIGHT(@substr2, LEN(@substr2) - @comma2)
-					SELECT @comma3 = CHARINDEX(',', @substr3)
-
-					SELECT @addr1 = LEFT(@address, @comma1 - 1)
-					SELECT @city = LTRIM(LEFT(@substr2, @comma2 - 1))
-					SELECT @state = LEFT(LTRIM(LEFT(@substr3, @comma3 - 1)),2)
-					SELECT @zip = REPLACE(LTRIM(LEFT(@substr3, @comma3 - 1)), @state + ' ', '')
+					if @address <> ''
+					BEGIN
+						DECLARE @addr1 varchar(50), @city varchar(30), @state varchar(4), @zip varchar(12)
+						DECLARE @comma1 int, @comma2 int, @comma3 int, @substr2 varchar(1000), @substr3 varchar(1000)
+						SELECT @comma1 = CHARINDEX(',', @address)
+						SELECT @substr2 = RIGHT(@address, LEN(@address) - @comma1)
+						SELECT @comma2 = CHARINDEX(',', @substr2)
+						SELECT @substr3 = RIGHT(@substr2, LEN(@substr2) - @comma2)
+						SELECT @comma3 = CHARINDEX(',', @substr3)
+						if (@comma1 = '0' or @comma2 = '0' or @comma3 = '0')
+							BEGIN
+							SET @addr1 = ''
+							SET @city = ''
+							SET @state = ''
+							SET @zip = ''
+							END
+						ELSE
+						BEGIN
+						SELECT @addr1 = LEFT(@address, @comma1 - 1)
+						SELECT @city = LTRIM(LEFT(@substr2, @comma2 - 1))
+						SELECT @state = LEFT(LTRIM(LEFT(@substr3, @comma3 - 1)),2)
+						SELECT @zip = REPLACE(LTRIM(LEFT(@substr3, @comma3 - 1)), @state + ' ', '')
+						END
+					END
+					
 
 				-- help us clean our old connections, necessary to update call history from old accts
 				If @acctno IN (SELECT ACCTNO FROM CUSTVEND) AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
@@ -137,12 +152,11 @@ BEGIN
 				INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
 				VALUES (@acctno, @spotio_id)
 				END
+				
 				--since we linked acctno and spotio id above, we only need to search by hadco spotio id
 				If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
 				BEGIN
 					
-
-
 					--Much of this section borrowed from uspAddNewCustumer, from the old Call Report app
 					DECLARE @next int
 					select @next=cust_count from compsetup1
@@ -242,6 +256,13 @@ BEGIN
 	
 				IF @name <> '' AND @spotio_id IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
 				BEGIN
+					
+					----------------------------------------------------------
+					--Update Priority
+					----------------------------------------------------------
+					SELECT @acctno = acctno
+					FROM Hadco_SpotIO_ID
+					WHERE spotio_id = @spotio_id
 
 					----------------------------------------------------------
 					--Update customer details
@@ -258,31 +279,27 @@ BEGIN
 					"ACCOUNT_TYPE" = @account_type
 					where "acctno" = @acctno
 
-					print @website
-					print @OSFocus
-					print @account_type
-
 					set @approved = ''
 					set @approved = (select APPROVED from CUSTVENDSETUP where @acctno = ACCTNO)
 
 					If @acctno <> '' AND @approved = 'N'
 						begin
-				
-						UPDATE "CUSTVEND"
-						set
-							"ADR1" = RTRIM(@addr1)
-							,"CITY" = RTRIM(@city)
-							,"STATE" = RTRIM(@state)
-							,"ZIP" = RTRIM(@zip)
-							,"NAME" = @name
-						where "ACCTNO" = @acctno
+						if @addr1 = '' or @addr1 is null or @city = '' or @city is null or @state = '' or @state is null or @zip = '' or @zip is null or @name = '' or @name is null
+							begin
+							SET @BlankValue = 'Y'
+							end
+						ELSE
+						BEGIN
+							UPDATE "CUSTVEND"
+							set
+								"ADR1" = RTRIM(@addr1)
+								,"CITY" = RTRIM(@city)
+								,"STATE" = RTRIM(@state)
+								,"ZIP" = RTRIM(@zip)
+								,"NAME" = @name
+							where "ACCTNO" = @acctno
+						END
 
-					print @addr1
-					print @city
-					print @state
-					print @zip
-					print @name
-					print @stageid
 						--Not a Good Fit
 						if @stageid = '5'
 						BEGIN
@@ -307,20 +324,12 @@ BEGIN
 					end
 
 					----------------------------------------------------------
-					--Update Priority
-					----------------------------------------------------------
-					SELECT @acctno = acctno
-					FROM Hadco_SpotIO_ID
-					WHERE spotio_id = @spotio_id
-
-
-					----------------------------------------------------------
 					--Update call tracking
 					----------------------------------------------------------
 					DECLARE @DocNo as nvarchar(20)
 
 					--increment by 1 and get the doc no 
-					UPDATE [GDB_01_001].[dbo].[COUNTERSTBL]
+					UPDATE [GDB_01_001_test].[dbo].[COUNTERSTBL]
 					SET  
 						[COUNTER] = [COUNTER]+1         
 					where DOC_CATEGORY='CT'
@@ -526,8 +535,146 @@ BEGIN
 							, GETDATE()
 							, 'AUTO'
 					END
+					
+					----------------------------------------------------------
+					--Check for accounts not changed
+					----------------------------------------------------------
+					set @changeFailueReason = ''
+			if @acctno <> ''
+			BEGIN
+				if ((select ADR1 from CUSTVEND where ACCTNO = @acctno) <> @addr1)
+				or ((select CITY from CUSTVEND where ACCTNO = @acctno) <> @city)
+				or ((select STATE from CUSTVEND where ACCTNO = @acctno) <> @state)
+				or ((select ZIP from CUSTVEND where ACCTNO = @acctno) <> @zip)
+				or ((select NAME from CUSTVEND where ACCTNO = @acctno) <> @name)
+					BEGIN
+					if @approved = 'Y'
+						BEGIN
+							set @changeFailueReason = 'Approved customers can only be edited by management in this way'
+						END
+					ELSE
+						BEGIN
+							if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
+							BEGIN
+								set @changeFailueReason = 'Account on hold'
+							END
+						else
+							BEGIN
+								if @BlankValue = 'Y'
+								BEGIN
+									set @changeFailueReason = 'Missing name or full address details'
+								END
+								ELSE
+								BEGIN
+									set @changeFailueReason = 'Customer was not edited. Reason unknown'
+								END
+							END
+						END
+					END
+				ELSE if ((select ACCOUNT_TYPE from CUSTVENDSETUP where ACCTNO = @acctno) <> @account_type)
+				or ((select WEB_SITE from CUSTVEND where ACCTNO = @acctno) <> @website)
+				or ((select ALT3_CODE_C from CUSTVEND where ACCTNO = @acctno) <> @OSFocus)
+				or (@stageid = '5' and (select priority from custvendsetup where ACCTNO = @acctno) <> 'X')
+				or (@stageid = '6' and (select priority from custvendsetup where ACCTNO = @acctno) <> 'Z')
+				
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 70))
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 71))
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 72))
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 73))
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 74))
 
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 63))
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 62))
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 59))
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 60))
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 61))
 
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 57))
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 56))
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 55))
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 53))
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 54))
+				
+					BEGIN
+						if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
+							BEGIN
+								set @changeFailueReason = 'Account on hold'
+							END
+						else
+							BEGIN
+								if @BlankValue = 'Y'
+								BEGIN
+									set @changeFailueReason = 'Missing name or full address details'
+								END
+								ELSE
+								BEGIN
+									set @changeFailueReason = 'Customer was not edited. Reason unknown'
+								END
+							END
+					END
+				
+					--FOR NEW ACCOUNTS 
+				if @BlankValue = 'Y' AND @changeFailueReason = ''
+					BEGIN
+						set @changeFailueReason = 'Missing name or full address details'
+					END
+					if @changeFailueReason <> ''
+						begin
+							INSERT INTO HADCO_SPOTIO_BLOCKED_CHANGES (ACCTNO, SPOTIO_ID, FAILURE_REASON, UPDATE_REQUEST_DATE,ACCOUNT_TYPE_OLD,WEB_SITE_OLD,ADR1_OLD,CITY_OLD,STATE_OLD,ZIP_OLD,NAME_OLD,ALT3_CODE_C_OLD,PRIORITY_OLD,CONTACT1_FNAME_OLD,CONTACT1_LNAME_OLD,CONTACT1_TITLE_OLD,CONTACT1_EMAIL_OLD,CONTACT1_PHONE_OLD,CONTACT2_FNAME_OLD,CONTACT2_LNAME_OLD,CONTACT2_TITLE_OLD,CONTACT2_EMAIL_OLD,CONTACT2_PHONE_OLD,CONTACT3_FNAME_OLD,CONTACT3_LNAME_OLD,CONTACT3_TITLE_OLD,CONTACT3_EMAIL_OLD,CONTACT3_PHONE_OLD,ACCOUNT_TYPE_PROPOSED,WEB_SITE_PROPOSED,ADR1_PROPOSED,CITY_PROPOSED,STATE_PROPOSED,ZIP_PROPOSED,NAME_PROPOSED,ALT3_CODE_C_PROPOSED,PRIORITY_PROPOSED,CONTACT1_FNAME_PROPOSED,CONTACT1_LNAME_PROPOSED,CONTACT1_TITLE_PROPOSED,CONTACT1_EMAIL_PROPOSED,CONTACT1_PHONE_PROPOSED,CONTACT2_FNAME_PROPOSED,CONTACT2_LNAME_PROPOSED,CONTACT2_TITLE_PROPOSED,CONTACT2_EMAIL_PROPOSED,CONTACT2_PHONE_PROPOSED,CONTACT3_FNAME_PROPOSED,CONTACT3_LNAME_PROPOSED,CONTACT3_TITLE_PROPOSED,CONTACT3_EMAIL_PROPOSED,CONTACT3_PHONE_PROPOSED)
+							SELECT ACCTNO = @acctno
+							, SPOTIO_ID = @spotio_id
+							, FAILURE_REASON = @changeFailueReason
+							, UPDATE_REQUEST_DATE = GETDATE()
+							, ACCOUNT_TYPE_OLD = (select ACCOUNT_TYPE from CUSTVENDSETUP where ACCTNO = @acctno)
+							, WEB_SITE_OLD = (select WEB_SITE from CUSTVEND where ACCTNO = @acctno)
+							,ADR1_OLD = (select ADR1 from CUSTVEND where ACCTNO = @acctno)
+							,CITY_OLD = (select CITY from CUSTVEND where ACCTNO = @acctno)
+							,STATE_OLD = (select STATE from CUSTVEND where ACCTNO = @acctno)
+							,ZIP_OLD = (select ZIP from CUSTVEND where ACCTNO = @acctno)
+							,NAME_OLD = (select NAME from CUSTVEND where ACCTNO = @acctno)
+							,ALT3_CODE_C_OLD = (select ALT3_CODE_C from CUSTVEND where ACCTNO = @acctno)
+							,PRIORITY_OLD = (select priority from custvendsetup where ACCTNO = @acctno)
+							,CONTACT1_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT2_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT3_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,ACCOUNT_TYPE_PROPOSED = @account_type
+							,WEB_SITE_PROPOSED = @website
+							,ADR1_PROPOSED = @addr1
+							,CITY_PROPOSED =  @city
+							,STATE_PROPOSED = @state
+							,ZIP_PROPOSED = @zip
+							,NAME_PROPOSED = @name
+							,ALT3_CODE_C_PROPOSED = @OSFocus
+							,PRIORITY_PROPOSED = (case WHEN @osfocus = 'Y' THEN 'P' when @stageid = '5' then 'X' when @stageid = '6' then 'Z' else NULL end)
+							,CONTACT1_FNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 70)
+							,CONTACT1_LNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 71)
+							,CONTACT1_TITLE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 72)
+							,CONTACT1_EMAIL_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 73)
+							,CONTACT1_PHONE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 74)
+							,CONTACT2_FNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 63)
+							,CONTACT2_LNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 62)
+							,CONTACT2_TITLE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 59)
+							,CONTACT2_EMAIL_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 60)
+							,CONTACT2_PHONE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 61)
+							,CONTACT3_FNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 57)
+							,CONTACT3_LNAME_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 56)
+							,CONTACT3_TITLE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 55)
+							,CONTACT3_EMAIL_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 53)
+							,CONTACT3_PHONE_PROPOSED = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 54)
+						end
+					end
 				--keep track if file was processed 
 					set @processedFile = 'true'				
 			END
@@ -567,21 +714,23 @@ BEGIN
 			set @updateLoopVar = 0
 			set @numUpdates = (SELECT count(spotioId) FROM #TempFieldData2)
 
-
 			while @updateLoopVar < @numUpdates
 			BEGIN
 			
 
 			--for use in linking data in table3
 			set @spotio_id = (SELECT TOP 1 spotioId FROM #TempFieldData2)
+			set @acctno = ''
+			set @BlankValue = ''
 			
 			--website spotio fieldId
-			declare @spotioWebVar int, @spotioTelVar int, @spotioEmailVar int, @spotioAcctType int, @contact1Title int, @contact1Email int, @contact1Phone int, @contact1fname int, @contact1lname int, @contact2Title int, @contact2Email int, @contact2Phone int, @contact2fname int, @contact2lname int, @contact3Title int, @contact3Email int, @contact3Phone int, @contact3fname int, @contact3lname int, @OSFocusVar int
+			declare @spotioWebVar int, @spotioTelVar int, @spotioEmailVar int, @spotioAcctType int, @contact1Title int, @contact1Email int, @contact1Phone int, @contact1fname int, @contact1lname int, @contact2Title int, @contact2Email int, @contact2Phone int, @contact2fname int, @contact2lname int, @contact3Title int, @contact3Email int, @contact3Phone int, @contact3fname int, @contact3lname int, @OSFocusVar int, @spotioUserNameVar int, @insideUserEmailVar int
 			set @spotioWebVar = 20
 			set @spotioTelVar = 74
 			set @spotioEmailVar = 73
 			set @spotioAcctType = 10
 			set @OSFocusVar = 14
+			set @spotioUserNameVar = 21
 
 			set @contact1Title = 72
 			set @contact1Email = 73
@@ -617,6 +766,7 @@ BEGIN
 				accttype VARCHAR(100),
 				stageid VARCHAR(20),
 				osfocus VARCHAR(100),
+				userName varchar(100),
 				contact1Title varchar(100),
 				contact1Email varchar(100),
 				contact1Phone varchar(100),
@@ -634,7 +784,7 @@ BEGIN
 				contact3lname varchar(100),
 
 			)
-			INSERT INTO #TempFieldData3 (spotioId, acctno, acctname, addressValue, email, website, tel, accttype, stageid, osfocus, contact1Title, contact1Email, contact1Phone, contact1fname, contact1lname, contact2Title, contact2Email, contact2Phone, contact2fname, contact2lname, contact3Title, contact3Email, contact3Phone, contact3fname, contact3lname)
+			INSERT INTO #TempFieldData3 (spotioId, acctno, acctname, addressValue, email, website, tel, accttype, stageid, osfocus, userName, contact1Title, contact1Email, contact1Phone, contact1fname, contact1lname, contact2Title, contact2Email, contact2Phone, contact2fname, contact2lname, contact3Title, contact3Email, contact3Phone, contact3fname, contact3lname)
 			select data.value(N'(DataObjectFull/id)[1]', ' VARCHAR(100)')
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/externalDataObjectId)[1]', N'varchar(20)') AS acctno
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/name)[1]', N'varchar(60)') AS acctname
@@ -645,6 +795,7 @@ BEGIN
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioAcctType")]/value)[1]', N'varchar(100)') AS accttype
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/stageId)[1]', N'varchar(100)') AS stageid
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@OSFocusVar")]/value)[1]', N'varchar(100)') AS osfocus
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioUserNameVar")]/value)[1]', N'varchar(100)') AS userName
 
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1Title")]/value)[1]', N'varchar(100)') AS contact1Title
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@contact1Email")]/value)[1]', N'varchar(100)') AS contact1Email
@@ -666,9 +817,13 @@ BEGIN
 			FROM @xml.nodes('/ArrayOfDataObjectFull') AS TEMPTABLE(data)
 
 			
-			
-			set @acctno = (SELECT TOP 1 acctno FROM #TempFieldData3)
+
+			set @acctno = RTRIM((SELECT TOP 1 acctno FROM #TempFieldData3))
 			SET @name = RTRIM(REPLACE(ISNULL((SELECT TOP 1 acctname FROM #TempFieldData3),''), RTRIM(@acctno), ''))
+			if @name is null
+			begin
+			SET @name = (SELECT TOP 1 acctname FROM #TempFieldData3)
+			end
 			set @address = (SELECT TOP 1 addressValue FROM #TempFieldData3)
 			set @email = (SELECT TOP 1 email FROM #TempFieldData3)
 			set @website = (SELECT TOP 1 website FROM #TempFieldData3)
@@ -676,6 +831,8 @@ BEGIN
 			set @account_type = (SELECT TOP 1 CS.ACCOUNT_TYPE FROM CUSTVENDSETUP CS JOIN TBLCODE T ON CS.ACCOUNT_TYPE = T.TBLCODE AND TBLTYPE = '002' where name = (SELECT TOP 1 accttype FROM #TempFieldData3))
 			set @stageid = (SELECT TOP 1 stageid FROM #TempFieldData3)
 			set @OSFocus = (SELECT TOP 1 osfocus FROM #TempFieldData3)
+			set @username = (SELECT TOP 1 userName FROM #TempFieldData3)
+
 
 			set @spotiocontact1Title = (SELECT TOP 1 contact1Title FROM #TempFieldData3)
 			set @spotiocontact1Email = (SELECT TOP 1 contact1Email FROM #TempFieldData3)
@@ -694,10 +851,13 @@ BEGIN
 			set @spotiocontact3Phone = (SELECT TOP 1 contact3Phone FROM #TempFieldData3)
 			set @spotiocontact3fname = (SELECT TOP 1 contact3fname FROM #TempFieldData3)
 			set @spotiocontact3lname = (SELECT TOP 1 contact3lname FROM #TempFieldData3)
+
+			--find user from gathered username (only for input new account)
+			set @insideUser = (SELECT MIN(U.CCODE) FROM USERLIST U where U.F_NAME = LEFT(@username, CHARINDEX(' ', @username) - 1) AND U.L_NAME = RIGHT(RTRIM(@username), LEN(RTRIM(@username)) - CHARINDEX(' ', @username)))
 			
 
 			--if no assigned value, look up in spotio to hadco uid linking table
-			if (@acctno = '')
+			if (@acctno = '') or (@acctno is null)
 			BEGIN
 				SELECT @acctno = acctno
 				FROM Hadco_SpotIO_ID
@@ -712,29 +872,135 @@ BEGIN
 			SELECT @comma2_2 = CHARINDEX(',', @substr2_2)
 			SELECT @substr3_2 = RIGHT(@substr2_2, LEN(@substr2_2) - @comma2_2)
 			SELECT @comma3_2 = CHARINDEX(',', @substr3_2)
-
-			SELECT @addr1_2 = LEFT(@address, @comma1_2 - 1)
-			SELECT @city_2 = LTRIM(LEFT(@substr2_2, @comma2_2 - 1))
-			SELECT @state_2 = LEFT(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)),2)
-			SELECT @zip_2 = REPLACE(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)), @state_2 + ' ', '')
-
+			--CATCH ADDRESS ERROR
+			if (@comma1 = '0' or @comma2 = '0' or @comma3 = '0')
+				BEGIN
+					SET @addr1_2 = ''
+					SET @city_2 = ''
+					SET @state_2 = ''
+					SET @zip_2 = ''
+				END
+			ELSE
+				BEGIN
+					SELECT @addr1_2 = LEFT(@address, @comma1_2 - 1)
+					SELECT @city_2 = LTRIM(LEFT(@substr2_2, @comma2_2 - 1))
+					SELECT @state_2 = LEFT(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)),2)
+					SELECT @zip_2 = REPLACE(LTRIM(LEFT(@substr3_2, @comma3_2 - 1)), @state_2 + ' ', '')
+				end
 
 			
 			-- check if acct is approved customer
 			set @approved = ''
 			set @approved = (select APPROVED from CUSTVENDSETUP where @acctno = ACCTNO)
 
-			
+			--create new customer if necessary
+			if (@acctno is null) or @acctno = ''
+			begin
+			--add acct
+			If @name <> '' AND @spotio_id NOT IN (SELECT spotio_id FROM Hadco_SpotIO_ID)
+				BEGIN
+					--for these files, there is no outside sales person, so we assign AUTO
+					SET @user = 'AUTO'
+					--Much of this section borrowed from uspAddNewCustumer, from the old Call Report app
+					select @next=cust_count from compsetup1
+					set @next=@next+1
+					update compsetup1 set cust_count=cust_count+1
+					SET @acctno = CAST(@next AS varchar(12))
+
+					--Insert customer
+					insert into "CUSTVEND"
+						("ACCTNO", "SUBC", "CUST_VEND","REGION","NAME","ADR1","ADR2","CITY","STATE","ZIP","COUNTRY","WEB_SITE","TEL1","EMAIL","FAX_TIME", "ALT1_CODE_C", "ALT2_CODE_C", "ALT3_CODE_C", "ALT4_CODE_C", "PRINT_TARGET", "PRINT_EMAIL_FORMAT", "INTERCOMPANY_ACCOUNT", "ADDED_USR", "ADDED_DTE")
+					VALUES
+					(                             
+						@acctno
+						, '1'
+						, 'C'
+						, @user
+						, @name
+						, @addr1_2                                                                                                                                             --addr1 = everything before the first comma
+						, ''
+						, @city_2
+						, @state_2
+						, @zip_2
+						, 'US'
+						, @website
+						, @tel
+						, @email
+						,'00:00'
+						, NULL
+						, NULL
+						, NULL
+						, ''
+						, '2'
+						, '1'
+						, 'N'
+						, @user
+						, getdate()
+					)
+
+					insert into "CUSTVENDSETUP"
+						("ACCTNO", "SUBC", "CUST_VEND", "PRIORITY", "ACCOUNT_TYPE", "RCV_OVER_SHIP", "SHIP_DEF_NO", "BILL_DEF_NO", "PAY_DEF_NO", "PAY_US", "COMPANYNO", "DIVISION", "DEPART", "FORM_1099", "HOLD", "HOLD_DATE", "HOLD_BY", "APPROVED", "APPROVED_DATE", "APPROVED_BY", "ULINES","TERM_CODE" ,"SHIP_COMPLETE", "POST_SHIP_DOC", "INV_TYPE", "ACCOUNT_RATE", "EARLY_SHIPMENT", "DAYS_BEFORE_SHIPPING", "FOB", "FOB_LBL", "GL_ACCOUNT", "CURENCY_CONV", "MIN_ORDER_LINE", "MIN_ORDER", "QT_TYPE_DEF", "SO_TYPE_DEF", "RF_TYPE_DEF", "PO_TYPE_DEF", "SMAN1_NG", "SMAN2_NG", "SMAN3_NG", "SMAN4_NG", "SMAN5_NG", "SMAN1_DOCLN", "SMAN2_DOCLN", "SMAN3_DOCLN", "SMAN4_DOCLN", "SMAN5_DOCLN", "DISC_TYPE", "DISC_DOCLN", "MISC1_DOCLN", "MISC2_DOCLN", "MISC3_DOCLN", "MISC4_DOCLN", "MISC5_DOCLN", "MISC6_DOCLN", "MISC1_TYPE", "MISC2_TYPE", "MISC3_TYPE", "MISC4_TYPE", "MISC5_TYPE", "MISC6_TYPE", "MISC1_PRN", "MISC2_PRN", "MISC3_PRN", "MISC4_PRN", "MISC5_PRN", "MISC6_PRN", "MISC1_TTL", "MISC2_TTL", "MISC3_TTL", "MISC4_TTL", "MISC5_TTL", "MISC6_TTL", "SUBT_TAX_A", "SUBT_TAX_B", "SUBT_TAX_C", "M1_TAX_A", "M1_TAX_B", "M1_TAX_C", "M2_TAX_A", "M2_TAX_B", "M2_TAX_C", "M3_TAX_A", "M3_TAX_B", "M3_TAX_C", "M4_TAX_A", "M4_TAX_B", "M4_TAX_C", "M5_TAX_A", "M5_TAX_B", "M5_TAX_C", "M6_TAX_A", "M6_TAX_B", "M6_TAX_C", "TAX_A_CODE", "TAX_B_CODE", "TAX_C_CODE", "TAX_A_TTL", "TAX_B_TTL", "TAX_C_TTL", "EXCH_CORE_CHRG", "EXCH_CORE_RETURN", "EXCH_CORE_NOTE", "EXCH_CHARGE_FROM", "EXCH_CHARGE_COST", "EXCH_CORE_COST", "EXCH_CORE_PERC", "SMAN1_CODE", "ADDED_USR", "ADDED_DTE")
+					VALUES
+					(
+						@acctno
+						, '1'
+						, 'C'
+						, (CASE WHEN @osfocus = 'Y' THEN 'P' --High Priority Customer
+								WHEN @stageid = '5' THEN 'X' --Not a Good Fit
+								WHEN @stageid = '6' THEN 'Z' --Business Closed
+								ELSE NULL
+							END) 
+						, @account_type --Account Type
+						, 1.500000000000000e+001
+						, 0
+						, 0
+						, 0
+						, '02L'
+						, 1
+						, NULL
+						, NULL
+						, 'N'
+						, 'Y'
+						, getdate()
+						, @user
+						, 'N'
+						, getdate()
+						, @user
+						, 'N','RTBD', 'N', 'Y', 'D', NULL, 'N', 0, 'DST', 'FOB', '40000', 'USD', 0.000000000000000e+000, 4.000000000000000e+001, 'Q', 'S', 'R', 'P', 'N', 'N', 'N', 'N', 'N', 'D', 'D', 'D', 'D', 'D'
+						, '0', 'D', 'D', 'D', 'D', 'D', 'D', 'D', '1', '1', '1', '1', '1', '1', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N'
+						, 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', NULL, NULL, NULL, 'N', 'N', 'N', 'N', 30, 'Y', '2', '1', '5', 10
+						, @insideUser
+						, @user
+						, getdate()
+					)
+
+					--Record Pentagon acctno / SpotIO ID relationship
+					INSERT INTO Hadco_SpotIO_ID (acctno, spotio_id)
+					VALUES (@acctno, @spotio_id)
+
+					--keep track if file was processed
+					set @processedFile = 'true'
+				END	
+
+			--end adding account
+			END
+
 			--if we are able to pull an acctno to run off, we should be able to pull the info and modify not approved customer
 			If @acctno <> ''
 			begin
 				--not changing atm "REGION" (not available), "ADDED_USR" (not available), "ADDED_DTE" (we should never have to change)
-				UPDATE "CUSTVEND"
-					set
-					"WEB_SITE" = @website
-					, "ALT3_CODE_C" = @OSFocus
-					where "ACCTNO" = @acctno
-
+					if @addr1_2 = '' or @addr1_2 is null or @city_2 = '' or @city_2 is null or @state_2 = '' or @state_2 is null or @zip_2 = '' or @zip_2 is null or @name = '' or @name is null
+						begin
+							SET @BlankValue = 'Y'
+						end
+					ELSE
+						BEGIN
+							UPDATE "CUSTVEND"
+								set
+								"WEB_SITE" = @website
+								, "ALT3_CODE_C" = @OSFocus
+								where "ACCTNO" = @acctno
+						END	
 					UPDATE "CUSTVENDSETUP"
 					set
 					"ACCOUNT_TYPE" = @account_type
@@ -895,22 +1161,24 @@ BEGIN
 			end
 
 			--if acctno has value and not an approved cust
-			print @acctno
-			print @approved
-			print @stageid
 
 			If @acctno <> '' AND @approved = 'N'
 			begin
-				
-				
-				UPDATE "CUSTVEND"
-					set
-					"ADR1" = RTRIM(@addr1_2)
-					,"CITY" = RTRIM(@city_2)
-					,"STATE" = RTRIM(@state_2)
-					,"ZIP" = RTRIM(@zip_2)
-					,"NAME" = @name
-					where "ACCTNO" = @acctno
+					if @addr1_2 = '' or @addr1_2 is null or @city_2 = '' or @city_2 is null or @state_2 = '' or @state_2 is null or @zip_2 = '' or @zip_2 is null or @name = '' or @name is null
+						begin
+						SET @BlankValue = 'Y'
+						end
+				ELSE
+					BEGIN
+						UPDATE "CUSTVEND"
+						set
+							"ADR1" = RTRIM(@addr1_2)
+							,"CITY" = RTRIM(@city_2)
+							,"STATE" = RTRIM(@state_2)
+							,"ZIP" = RTRIM(@zip_2)
+							,"NAME" = @name
+						where "ACCTNO" = @acctno
+					END
 
 					
 					--Not a Good Fit
@@ -929,13 +1197,153 @@ BEGIN
 						SET PRIORITY = 'Z'
 						WHERE ACCTNO = @acctno
 						AND CUST_VEND = 'C'
-						print 'success'
 					END
 
 					--keep track if file was processed
 					set @processedFile = 'true'
 				
 			end
+
+			--begin log of accounts not changed
+			
+			set @changeFailueReason = ''
+			if @acctno <> ''
+			BEGIN
+				if ((select ADR1 from CUSTVEND where ACCTNO = @acctno) <> @addr1_2)
+				or ((select CITY from CUSTVEND where ACCTNO = @acctno) <> @city_2)
+				or ((select STATE from CUSTVEND where ACCTNO = @acctno) <> @state_2)
+				or ((select ZIP from CUSTVEND where ACCTNO = @acctno) <> @zip_2)
+				or ((select NAME from CUSTVEND where ACCTNO = @acctno) <> @name)
+					BEGIN
+					if @approved = 'Y'
+						BEGIN
+							set @changeFailueReason = 'Approved customers can only be edited by management in this way'
+						END
+					ELSE
+						BEGIN
+							if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
+							BEGIN
+								set @changeFailueReason = 'Account on hold'
+							END
+						else
+							BEGIN
+								if @BlankValue = 'Y'
+								BEGIN
+									set @changeFailueReason = 'Missing name or full address details'
+								END
+								ELSE
+								BEGIN
+									set @changeFailueReason = 'Customer was not edited. Reason unknown'
+								END
+							END
+						END
+					END
+				ELSE if ((select ACCOUNT_TYPE from CUSTVENDSETUP where ACCTNO = @acctno) <> @account_type)
+				or ((select WEB_SITE from CUSTVEND where ACCTNO = @acctno) <> @website)
+				or ((select ALT3_CODE_C from CUSTVEND where ACCTNO = @acctno) <> @OSFocus)
+				or (@stageid = '5' and (select priority from custvendsetup where ACCTNO = @acctno) <> 'X')
+				or (@stageid = '6' and (select priority from custvendsetup where ACCTNO = @acctno) <> 'Z')
+				
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> @spotiocontact1fname)
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> @spotiocontact1lname)
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> @spotiocontact1Title)
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> @spotiocontact1Email)
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')) <> @spotiocontact1Phone)
+
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> @spotiocontact2fname)
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> @spotiocontact2lname)
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> @spotiocontact2Title)
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> @spotiocontact2Email)
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')) <> @spotiocontact2Phone)
+
+				or ((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3fname)
+				or ((select l_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3lname)
+				or ((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3Title)
+				or ((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3Email)
+				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3Phone)
+				
+					BEGIN
+						if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
+							BEGIN
+								set @changeFailueReason = 'Account on hold'
+							END
+						else
+							BEGIN
+								if @BlankValue = 'Y'
+								BEGIN
+									set @changeFailueReason = 'Missing name or full address details'
+								END
+								ELSE
+								BEGIN
+									set @changeFailueReason = 'Customer was not edited. Reason unknown'
+								END
+							END
+					END
+
+				--FOR NEW ACCOUNTS 
+				if @BlankValue = 'Y' AND @changeFailueReason = ''
+					BEGIN
+						set @changeFailueReason = 'Missing name or full address details'
+					END
+					if @changeFailueReason <> ''
+						begin
+							INSERT INTO HADCO_SPOTIO_BLOCKED_CHANGES (ACCTNO, SPOTIO_ID, FAILURE_REASON, UPDATE_REQUEST_DATE,ACCOUNT_TYPE_OLD,WEB_SITE_OLD,ADR1_OLD,CITY_OLD,STATE_OLD,ZIP_OLD,NAME_OLD,ALT3_CODE_C_OLD,PRIORITY_OLD,CONTACT1_FNAME_OLD,CONTACT1_LNAME_OLD,CONTACT1_TITLE_OLD,CONTACT1_EMAIL_OLD,CONTACT1_PHONE_OLD,CONTACT2_FNAME_OLD,CONTACT2_LNAME_OLD,CONTACT2_TITLE_OLD,CONTACT2_EMAIL_OLD,CONTACT2_PHONE_OLD,CONTACT3_FNAME_OLD,CONTACT3_LNAME_OLD,CONTACT3_TITLE_OLD,CONTACT3_EMAIL_OLD,CONTACT3_PHONE_OLD,ACCOUNT_TYPE_PROPOSED,WEB_SITE_PROPOSED,ADR1_PROPOSED,CITY_PROPOSED,STATE_PROPOSED,ZIP_PROPOSED,NAME_PROPOSED,ALT3_CODE_C_PROPOSED,PRIORITY_PROPOSED,CONTACT1_FNAME_PROPOSED,CONTACT1_LNAME_PROPOSED,CONTACT1_TITLE_PROPOSED,CONTACT1_EMAIL_PROPOSED,CONTACT1_PHONE_PROPOSED,CONTACT2_FNAME_PROPOSED,CONTACT2_LNAME_PROPOSED,CONTACT2_TITLE_PROPOSED,CONTACT2_EMAIL_PROPOSED,CONTACT2_PHONE_PROPOSED,CONTACT3_FNAME_PROPOSED,CONTACT3_LNAME_PROPOSED,CONTACT3_TITLE_PROPOSED,CONTACT3_EMAIL_PROPOSED,CONTACT3_PHONE_PROPOSED)
+							SELECT ACCTNO = @acctno
+							, SPOTIO_ID = @spotio_id
+							, FAILURE_REASON = @changeFailueReason
+							, UPDATE_REQUEST_DATE = GETDATE()
+							, ACCOUNT_TYPE_OLD = (select ACCOUNT_TYPE from CUSTVENDSETUP where ACCTNO = @acctno)
+							, WEB_SITE_OLD = (select WEB_SITE from CUSTVEND where ACCTNO = @acctno)
+							,ADR1_OLD = (select ADR1 from CUSTVEND where ACCTNO = @acctno)
+							,CITY_OLD = (select CITY from CUSTVEND where ACCTNO = @acctno)
+							,STATE_OLD = (select STATE from CUSTVEND where ACCTNO = @acctno)
+							,ZIP_OLD = (select ZIP from CUSTVEND where ACCTNO = @acctno)
+							,NAME_OLD = (select NAME from CUSTVEND where ACCTNO = @acctno)
+							,ALT3_CODE_C_OLD = (select ALT3_CODE_C from CUSTVEND where ACCTNO = @acctno)
+							,PRIORITY_OLD = (select priority from custvendsetup where ACCTNO = @acctno)
+							,CONTACT1_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT1_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S01')
+							,CONTACT2_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT2_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S02')
+							,CONTACT3_FNAME_OLD = (select f_name from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_LNAME_OLD = (select L_NAME from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_TITLE_OLD = (select TITLE from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_EMAIL_OLD = (select EMAIL from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,CONTACT3_PHONE_OLD = (select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')
+							,ACCOUNT_TYPE_PROPOSED = @account_type
+							,WEB_SITE_PROPOSED = @website
+							,ADR1_PROPOSED = @addr1_2
+							,CITY_PROPOSED =  @city_2
+							,STATE_PROPOSED = @state_2
+							,ZIP_PROPOSED = @zip_2
+							,NAME_PROPOSED = @name
+							,ALT3_CODE_C_PROPOSED = @OSFocus
+							,PRIORITY_PROPOSED = (case WHEN @osfocus = 'Y' THEN 'P' when @stageid = '5' then 'X' when @stageid = '6' then 'Z' else NULL end)
+							,CONTACT1_FNAME_PROPOSED = @spotiocontact1fname
+							,CONTACT1_LNAME_PROPOSED = @spotiocontact1lname
+							,CONTACT1_TITLE_PROPOSED = @spotiocontact1Title
+							,CONTACT1_EMAIL_PROPOSED = @spotiocontact1Email
+							,CONTACT1_PHONE_PROPOSED = @spotiocontact1Phone
+							,CONTACT2_FNAME_PROPOSED = @spotiocontact2fname
+							,CONTACT2_LNAME_PROPOSED = @spotiocontact2lname
+							,CONTACT2_TITLE_PROPOSED = @spotiocontact2Title
+							,CONTACT2_EMAIL_PROPOSED = @spotiocontact2Email
+							,CONTACT2_PHONE_PROPOSED = @spotiocontact2Phone
+							,CONTACT3_FNAME_PROPOSED = @spotiocontact3fname
+							,CONTACT3_LNAME_PROPOSED = @spotiocontact3lname
+							,CONTACT3_TITLE_PROPOSED = @spotiocontact3Title
+							,CONTACT3_EMAIL_PROPOSED = @spotiocontact3Email
+							,CONTACT3_PHONE_PROPOSED = @spotiocontact3Phone
+						end
+			--stop looking for download failures
+			end
+			
 			--end loop here
 			DELETE FROM #TempFieldData2 WHERE spotioId = @spotio_id
 			set @updateLoopVar = @updateLoopVar + 1
