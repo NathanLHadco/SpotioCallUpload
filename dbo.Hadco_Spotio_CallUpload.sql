@@ -329,7 +329,7 @@ BEGIN
 					DECLARE @DocNo as nvarchar(20)
 
 					--increment by 1 and get the doc no 
-					UPDATE [GDB_01_001_test].[dbo].[COUNTERSTBL]
+					UPDATE [GDB_01_001].[dbo].[COUNTERSTBL]
 					SET  
 						[COUNTER] = [COUNTER]+1         
 					where DOC_CATEGORY='CT'
