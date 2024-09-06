@@ -1,6 +1,6 @@
 USE [GDB_01_001]
 GO
-/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 8/21/2024 10:22:46 AM ******/
+/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 9/6/2024 2:12:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -67,13 +67,22 @@ BEGIN
 	--nate file variable
 				DECLARE @processedFile bit
 				set @processedFile = 'false'
-
+				-- get spotio id here
+				SELECT @spotio_id = ISNULL(data.value('(id)[1]','VARCHAR(100)'),'')
+				FROM @xml.nodes('/ActivityOutput/ActivityItem/dataObject') AS TEMPTABLE(data)
 				--Get date
 				SELECT @date = data.value('(date)[1]','DATETIME')
 				FROM @xml.nodes('/ActivityOutput/ActivityItem') AS TEMPTABLE(data)
 				--Get Spotio ID and name
 				SELECT @acctno = ISNULL(data.value('(externalDataObjectId)[1]','VARCHAR(1000)'),'')
 				FROM @xml.nodes('/ActivityOutput/CustomerData') AS TEMPTABLE(data)
+				--getting the acctno if not available
+				if (@acctno = '') or (@acctno is null)
+				BEGIN
+					SELECT @acctno = acctno
+					FROM Hadco_SpotIO_ID
+					WHERE spotio_id = @spotio_id
+				End
 
 				SELECT @spotio_id = ISNULL(data.value('(id)[1]','VARCHAR(100)'),'')
 	--acctno has no value here
@@ -1375,7 +1384,6 @@ BEGIN
 			
 			
 		END
-
 		DROP TABLE #TempFieldData
 		DROP TABLE #TempFieldData2
 	END
