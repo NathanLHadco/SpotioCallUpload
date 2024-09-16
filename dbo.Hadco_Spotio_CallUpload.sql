@@ -1,6 +1,6 @@
 USE [GDB_01_001]
 GO
-/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 9/6/2024 2:12:59 PM ******/
+/****** Object:  StoredProcedure [dbo].[Hadco_Spotio_CallUpload]    Script Date: 9/16/2024 11:27:34 AM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -76,21 +76,6 @@ BEGIN
 				--Get Spotio ID and name
 				SELECT @acctno = ISNULL(data.value('(externalDataObjectId)[1]','VARCHAR(1000)'),'')
 				FROM @xml.nodes('/ActivityOutput/CustomerData') AS TEMPTABLE(data)
-				--getting the acctno if not available
-				if (@acctno = '') or (@acctno is null)
-				BEGIN
-					SELECT @acctno = acctno
-					FROM Hadco_SpotIO_ID
-					WHERE spotio_id = @spotio_id
-				End
-
-				SELECT @spotio_id = ISNULL(data.value('(id)[1]','VARCHAR(100)'),'')
-	--acctno has no value here
-					
-					, @name = RTRIM(REPLACE(ISNULL(data.value('(name)[1]','VARCHAR(100)'),''), RTRIM(@acctno), ''))
-					, @address = ISNULL(data.value('(address)[1]','VARCHAR(1000)'),'')
-					, @stageid = ISNULL(data.value('(stageId)[1]','VARCHAR(20)'),'')
-				FROM @xml.nodes('/ActivityOutput/ActivityItem/dataObject') AS TEMPTABLE(data)
 
 				-- Match salesperson based on user or name
 				SELECT @user = 
@@ -118,6 +103,29 @@ BEGIN
 				set @website = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 20)
 				set @OSFocus = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 14)
 				set @account_type = (SELECT TOP 1 CS.ACCOUNT_TYPE FROM CUSTVENDSETUP CS JOIN TBLCODE T ON CS.ACCOUNT_TYPE = T.TBLCODE AND TBLTYPE = '002' where name = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 10))
+
+				--getting the acctno if not available
+				
+				if (@acctno = '') or (@acctno is null)
+				BEGIN
+					SELECT @acctno = acctno
+					FROM Hadco_SpotIO_ID
+					WHERE spotio_id = @spotio_id
+				End
+				if (@acctno = '') or (@acctno is null)
+				BEGIN
+					SET @acctno = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 66)
+				End
+				
+				
+
+				SELECT @spotio_id = ISNULL(data.value('(id)[1]','VARCHAR(100)'),'')
+	--acctno has no value here
+					
+					, @name = RTRIM(REPLACE(ISNULL(data.value('(name)[1]','VARCHAR(100)'),''), RTRIM(@acctno), ''))
+					, @address = ISNULL(data.value('(address)[1]','VARCHAR(1000)'),'')
+					, @stageid = ISNULL(data.value('(stageId)[1]','VARCHAR(20)'),'')
+				FROM @xml.nodes('/ActivityOutput/ActivityItem/dataObject') AS TEMPTABLE(data)
 
 				--Get details about the new customer
 					
@@ -412,8 +420,7 @@ BEGIN
 
 					--Contact 1
 					--Update
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (70,71))
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01')
+					IF EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01')
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 70) --first name
@@ -427,7 +434,7 @@ BEGIN
 						AND CCODE = 'S01'
 					END
 					--Insert
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (70,71))
+					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (70,71,72,73,74))
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01')
 					BEGIN
 						--Get and increment counter	
@@ -461,8 +468,7 @@ BEGIN
 
 					--Contact 2
 					--Update
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (62,63))
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02')
+					IF EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02')
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 63) --first name
@@ -476,7 +482,7 @@ BEGIN
 						AND CCODE = 'S02'
 					END
 					--Insert
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (62,63))
+					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (59,60,61,62,63))
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02')
 					BEGIN
 						--Get and increment counter	
@@ -504,8 +510,7 @@ BEGIN
 
 					--Contact 3
 					--Update
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (56,57))
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03')
+					IF EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03')
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 57) --first name
@@ -519,7 +524,7 @@ BEGIN
 						AND CCODE = 'S03'
 					END
 					--Insert
-					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (56,57))
+					IF EXISTS (SELECT * FROM #TempFieldData WHERE fieldID IN (53,54,55,56,57))
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03')
 					BEGIN
 						--Get and increment counter	
@@ -563,11 +568,6 @@ BEGIN
 						END
 					ELSE
 						BEGIN
-							if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
-							BEGIN
-								set @changeFailueReason = 'Account on hold'
-							END
-						else
 							BEGIN
 								if @BlankValue = 'Y'
 								BEGIN
@@ -605,11 +605,6 @@ BEGIN
 				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> (SELECT fieldValue FROM #TempFieldData WHERE fieldID = 54))
 				
 					BEGIN
-						if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
-							BEGIN
-								set @changeFailueReason = 'Account on hold'
-							END
-						else
 							BEGIN
 								if @BlankValue = 'Y'
 								BEGIN
@@ -733,13 +728,14 @@ BEGIN
 			set @BlankValue = ''
 			
 			--website spotio fieldId
-			declare @spotioWebVar int, @spotioTelVar int, @spotioEmailVar int, @spotioAcctType int, @contact1Title int, @contact1Email int, @contact1Phone int, @contact1fname int, @contact1lname int, @contact2Title int, @contact2Email int, @contact2Phone int, @contact2fname int, @contact2lname int, @contact3Title int, @contact3Email int, @contact3Phone int, @contact3fname int, @contact3lname int, @OSFocusVar int, @spotioUserNameVar int, @insideUserEmailVar int
+			declare @spotioWebVar int, @spotioTelVar int, @spotioEmailVar int, @spotioAcctType int, @HadcoacctnoVar int, @contact1Title int, @contact1Email int, @contact1Phone int, @contact1fname int, @contact1lname int, @contact2Title int, @contact2Email int, @contact2Phone int, @contact2fname int, @contact2lname int, @contact3Title int, @contact3Email int, @contact3Phone int, @contact3fname int, @contact3lname int, @OSFocusVar int, @spotioUserNameVar int, @insideUserEmailVar int
 			set @spotioWebVar = 20
 			set @spotioTelVar = 74
 			set @spotioEmailVar = 73
 			set @spotioAcctType = 10
 			set @OSFocusVar = 14
 			set @spotioUserNameVar = 21
+			set @HadcoacctnoVar = 66
 
 			set @contact1Title = 72
 			set @contact1Email = 73
@@ -766,6 +762,7 @@ BEGIN
 			CREATE TABLE #TempFieldData3
 			(
 				spotioId  VARCHAR(100),
+				hadcoId  VARCHAR(100),
 				acctno VARCHAR(20),
 				acctname VARCHAR(60),
 				addressValue VARCHAR(1000),
@@ -793,9 +790,10 @@ BEGIN
 				contact3lname varchar(100),
 
 			)
-			INSERT INTO #TempFieldData3 (spotioId, acctno, acctname, addressValue, email, website, tel, accttype, stageid, osfocus, userName, contact1Title, contact1Email, contact1Phone, contact1fname, contact1lname, contact2Title, contact2Email, contact2Phone, contact2fname, contact2lname, contact3Title, contact3Email, contact3Phone, contact3fname, contact3lname)
+			INSERT INTO #TempFieldData3 (spotioId, hadcoId, acctno, acctname, addressValue, email, website, tel, accttype, stageid, osfocus, userName, contact1Title, contact1Email, contact1Phone, contact1fname, contact1lname, contact2Title, contact2Email, contact2Phone, contact2fname, contact2lname, contact3Title, contact3Email, contact3Phone, contact3fname, contact3lname)
 			select data.value(N'(DataObjectFull/id)[1]', ' VARCHAR(100)')
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/externalDataObjectId)[1]', N'varchar(20)') AS acctno
+			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/externalDataObjectId)[1]', N'varchar(20)') AS hadcoId
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/name)[1]', N'varchar(60)') AS acctname
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/pin/address)[1]', N'varchar(1000)') AS addressValue
 			, data.value(N'(DataObjectFull[(id)[1] = sql:variable("@spotio_id")]/fields/Field[(fieldId)[1] = sql:variable("@spotioEmailVar")]/value)[1]', N'varchar(100)') AS email
@@ -828,6 +826,19 @@ BEGIN
 			
 
 			set @acctno = RTRIM((SELECT TOP 1 acctno FROM #TempFieldData3))
+			--if no assigned value, look up in spotio to hadco uid linking table
+			if (@acctno = '') or (@acctno is null)
+			BEGIN
+				SELECT @acctno = acctno
+				FROM Hadco_SpotIO_ID
+				WHERE spotio_id = @spotio_id
+			End
+			if (@acctno = '') or (@acctno is null)
+			BEGIN
+				set @acctno = RTRIM((SELECT TOP 1 hadcoId FROM #TempFieldData3))
+			End
+			
+			
 			SET @name = RTRIM(REPLACE(ISNULL((SELECT TOP 1 acctname FROM #TempFieldData3),''), RTRIM(@acctno), ''))
 			if @name is null
 			begin
@@ -1019,8 +1030,7 @@ BEGIN
 					
 					--Contact 1
 					--Update
-					IF (@spotiocontact1fname <> '' and @spotiocontact1lname <> ''
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01'))
+					IF (EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01'))
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (@spotiocontact1fname) --first name
@@ -1034,7 +1044,7 @@ BEGIN
 						AND CCODE = 'S01'
 					END
 					--Insert
-					IF (@spotiocontact1fname <> '' and @spotiocontact1lname <> ''
+					IF ((@spotiocontact1fname <> '' or @spotiocontact1lname <> '' or @spotiocontact1Title <> '' or @spotiocontact1Phone <> '' or @spotiocontact1Email <> '')
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S01'))
 					BEGIN
 						--Get and increment counter	
@@ -1068,8 +1078,7 @@ BEGIN
 
 					--Contact 2
 					--Update
-					IF (@spotiocontact2fname <> '' and @spotiocontact2lname <> ''
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02'))
+					IF (EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02'))
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (@spotiocontact2fname) --first name
@@ -1083,7 +1092,7 @@ BEGIN
 						AND CCODE = 'S02'
 					END
 					--Insert
-					IF (@spotiocontact2fname <> '' and @spotiocontact2lname <> ''
+					IF ((@spotiocontact2fname <> '' or @spotiocontact2lname <> '' or @spotiocontact2Title <> '' or @spotiocontact2Phone <> '' or @spotiocontact2Email <> '')
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S02'))
 					BEGIN
 						--Get and increment counter	
@@ -1117,8 +1126,7 @@ BEGIN
 
 					--Contact 3
 					--Update
-					IF (@spotiocontact3fname <> '' and @spotiocontact3lname <> ''
-						AND EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03'))
+					IF (EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03'))
 					BEGIN
 						UPDATE CONTACTS
 						SET F_NAME = (@spotiocontact3fname) --first name
@@ -1132,7 +1140,7 @@ BEGIN
 						AND CCODE = 'S03'
 					END
 					--Insert
-					IF (@spotiocontact3fname <> '' and @spotiocontact3lname <> ''
+					IF ((@spotiocontact3fname <> '' or @spotiocontact3lname <> '' or @spotiocontact3Title <> '' or @spotiocontact3Phone <> '' or @spotiocontact3Email <> '')
 						AND NOT EXISTS (SELECT * FROM CONTACTS WHERE ACCTNO = @acctno AND CCODE = 'S03'))
 					BEGIN
 						--Get and increment counter	
@@ -1230,11 +1238,6 @@ BEGIN
 						END
 					ELSE
 						BEGIN
-							if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
-							BEGIN
-								set @changeFailueReason = 'Account on hold'
-							END
-						else
 							BEGIN
 								if @BlankValue = 'Y'
 								BEGIN
@@ -1272,11 +1275,6 @@ BEGIN
 				or ((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03') <> '' and RTRIM((select TEL1 from CONTACTS where ACCTNO = @acctno and CCODE = 'S03')) <> @spotiocontact3Phone)
 				
 					BEGIN
-						if (select HOLD from CUSTVENDSETUP where ACCTNO = @acctno) = 'Y'
-							BEGIN
-								set @changeFailueReason = 'Account on hold'
-							END
-						else
 							BEGIN
 								if @BlankValue = 'Y'
 								BEGIN
@@ -1380,10 +1378,11 @@ BEGIN
 			
 			--nate stop messing
 			
-			SET @counter = @counter + 1
+			
 			
 			
 		END
+		SET @counter = @counter + 1
 		DROP TABLE #TempFieldData
 		DROP TABLE #TempFieldData2
 	END
